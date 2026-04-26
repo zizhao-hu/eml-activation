@@ -1,0 +1,63 @@
+% Lightweight stand-in for the NeurIPS 2024 style file.
+% Replicates the visual look (margins, fonts, section headings, abstract box)
+% so the paper compiles without external assets. Replace this file with the
+% official neurips_2024.sty before final submission to NeurIPS proper.
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{neurips_2024}[2024/01/01 v1.0 NeurIPS-style stand-in]
+
+\RequirePackage{geometry}
+\geometry{
+  letterpaper,
+  textwidth=5.5in,
+  textheight=9.0in,
+  top=1.0in,
+  left=1.5in,
+  headheight=12pt,
+  headsep=10pt,
+  footskip=30pt
+}
+
+\RequirePackage{times}
+\renewcommand{\rmdefault}{ptm}
+
+\RequirePackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\RequirePackage{titlesec}
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.0\baselineskip}{0.5\baselineskip}
+\titlespacing*{\subsection}{0pt}{0.8\baselineskip}{0.4\baselineskip}
+
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0.0em}
+
+\renewcommand{\baselinestretch}{1.0}
+
+% Abstract: indented, smaller, bold "Abstract" label like NeurIPS.
+\renewenvironment{abstract}{%
+  \begin{center}%
+    \textbf{\large Abstract}%
+  \end{center}%
+  \begingroup
+  \leftskip0.5in \rightskip0.5in
+  \small
+}{%
+  \endgroup
+  \vskip 1em
+}
+
+% Provide \And for the author block, NeurIPS style.
+\providecommand{\And}{\quad}
+\providecommand{\AND}{\\}
+
+% A flag the official style uses; harmless here.
+\newif\if@neuripsfinal
+\@neuripsfinaltrue
+\DeclareOption{final}{\@neuripsfinaltrue}
+\DeclareOption{preprint}{\@neuripsfinalfalse}
+\ProcessOptions\relax

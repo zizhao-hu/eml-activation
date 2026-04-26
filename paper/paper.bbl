@@ -1,0 +1,51 @@
+\begin{thebibliography}{6}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Choromanski et~al.(2021)Choromanski, Likhosherstov, Dohan, Song, Gane,
+  Sarl{\'o}s, Hawkins, Davis, Mohiuddin, Kaiser, Belanger, Colwell, and
+  Weller]{choromanski2021performers}
+Krzysztof Choromanski, Valerii Likhosherstov, David Dohan, Xingyou Song,
+  Andreea Gane, Tam{\'a}s Sarl{\'o}s, Peter Hawkins, Jared Davis, Afroz
+  Mohiuddin, Lukasz Kaiser, David Belanger, Lucy Colwell, and Adrian Weller.
+\newblock Rethinking attention with {P}erformers.
+\newblock In \emph{International Conference on Learning Representations}, 2021.
+
+\bibitem[Katharopoulos et~al.(2020)Katharopoulos, Vyas, Pappas, and
+  Fleuret]{katharopoulos2020transformers}
+Angelos Katharopoulos, Apoorv Vyas, Nikolaos Pappas, and Fran{\c{c}}ois
+  Fleuret.
+\newblock Transformers are {RNN}s: Fast autoregressive transformers with linear
+  attention.
+\newblock In \emph{International Conference on Machine Learning}, pages
+  5156--5165, 2020.
+
+\bibitem[Odrzywo{\l}ek(2026{\natexlab{a}})]{odrzywolek2026eml}
+Andrzej Odrzywo{\l}ek.
+\newblock All elementary functions from a single binary operator.
+\newblock \emph{arXiv preprint arXiv:2603.21852}, 2026{\natexlab{a}}.
+
+\bibitem[Odrzywo{\l}ek(2026{\natexlab{b}})]{odrzywolek2026hardware}
+Andrzej Odrzywo{\l}ek.
+\newblock Hardware-efficient neuro-symbolic networks with the {Exp-Minus-Log}
+  operator.
+\newblock \emph{arXiv preprint arXiv:2604.13871}, 2026{\natexlab{b}}.
+
+\bibitem[Vaswani et~al.(2017)Vaswani, Shazeer, Parmar, Uszkoreit, Jones, Gomez,
+  Kaiser, and Polosukhin]{vaswani2017attention}
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+  Aidan~N Gomez, {\L}ukasz Kaiser, and Illia Polosukhin.
+\newblock Attention is all you need.
+\newblock In \emph{Advances in Neural Information Processing Systems},
+  volume~30, 2017.
+
+\bibitem[Wortsman et~al.(2023)Wortsman, Lee, Gilmer, and
+  Kornblith]{wortsman2023replacing}
+Mitchell Wortsman, Jaehoon Lee, Justin Gilmer, and Simon Kornblith.
+\newblock Replacing softmax with {ReLU} in vision transformers.
+\newblock \emph{arXiv preprint arXiv:2309.08586}, 2023.
+
+\end{thebibliography}

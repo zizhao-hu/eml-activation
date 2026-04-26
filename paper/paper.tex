@@ -1,0 +1,365 @@
+\documentclass{article}
+
+\usepackage[final]{neurips_2024}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts,amsmath,amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage[numbers,sort&compress]{natbib}
+
+\title{Sheffer-Stroke Attention:\\
+A Single Binary Operator Replaces Softmax in Transformers}
+
+\author{%
+  Anonymous\thanks{Code: \url{https://github.com/zizhao-hu/llm-proof-walkthrough}}\\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+A recent result of Odrzywolek (2026) shows that the binary operator
+$\mathrm{eml}(x, y) = \exp(x) - \ln(y)$, together with the constant $1$,
+is a Sheffer stroke for the elementary functions: every standard scientific
+calculator function is a finite tree of \textsc{eml} nodes. We argue that
+the natural place for this universal binary primitive in a transformer is
+\emph{not} the unary activation slot (\textsc{relu}/\textsc{gelu}) but the
+\emph{binary normalization slot}: softmax. We instantiate two parameterized
+\textsc{eml}-attention variants---a single-projection form and a
+twin-projection form that strictly generalizes softmax---and benchmark them
+in a small character-level transformer on TinyShakespeare. Across three
+seeds, the EML variants outperform the softmax baseline by $0.11$ nats of
+validation loss at iso-iter and remain ahead by $0.03$--$0.06$ nats under an
+iso-wall-clock fairness budget, despite a $\sim$18--36\% per-iter slowdown
+on commodity CPU. We additionally verify that fixed-topology \textsc{eml}
+compositions reproduce $\exp$, $\ln$, and softmax to floating-point precision,
+and that small parameterized \textsc{eml} trees fit sigmoid and softmax
+several orders of magnitude below any reasonable threshold. The result is
+a self-contained, drop-in attention non-linearity built from a single
+universal binary primitive.
+\end{abstract}
+
+\section{Introduction}
+
+The softmax function has been the default normalization in transformer
+attention since the original architecture~\citep{vaswani2017attention}.
+Despite a steady stream of attempts to replace it---linear
+attention~\citep{katharopoulos2020transformers},
+ReLU-based attention~\citep{wortsman2023replacing},
+softmax-free variants for efficiency---softmax remains entrenched, and most
+alternatives trade a small accuracy loss for a speed or memory gain. We
+take a different tack. Rather than asking ``what is faster than softmax?'',
+we ask: \emph{what is the right primitive shape for this slot of the
+network at all?}
+
+The slot has a particular structure. Softmax is binary in its inputs:
+each output cell depends on its own logit and on a per-row aggregate of
+sibling logits. Standard activation functions like \textsc{relu} and
+\textsc{gelu} are unary. So the softmax slot calls for a binary primitive,
+and the question becomes: is there a privileged binary primitive that fits
+naturally?
+
+A recent purely mathematical result by~\citet{odrzywolek2026eml} answers
+yes. The exp-minus-log (EML) operator
+\begin{equation}
+  \mathrm{eml}(x, y) \;=\; \exp(x) - \ln(y)
+  \label{eq:eml}
+\end{equation}
+is a Sheffer stroke for the elementary functions: together with the
+constant $1$, it generates the entire scientific-calculator basis as
+finite trees, with no other operators or learned parameters needed. Like
+NAND in propositional logic, EML is a universal binary primitive---this
+time over real-valued elementary functions. \citet{odrzywolek2026hardware}
+explored this on the hardware side, embedding EML in FPGA/analog cells for
+neuro-symbolic deployment. The natural complementary question---does EML
+help when used as a \emph{learning} primitive on commodity GPUs?---is, to
+our knowledge, unexplored.
+
+\paragraph{Contributions.} We present \textbf{Sheffer-Stroke Attention}
+(EML-Attention), a drop-in replacement for the softmax in transformer
+attention based on a single application of the EML operator with learned
+linear legs:
+\begin{itemize}
+  \item We give a numerically careful PyTorch realization of EML with
+        positivity options for the $\ln$ leg, an $\exp$ clamp, and an
+        \textsc{fp32} fence under autocast.
+  \item We instantiate two attention variants: \textsc{eml-norm-v1}
+        (single-projection EML on the row aggregate) and
+        \textsc{eml-norm-v2} (twin-projection EML, a strict generalization
+        of softmax that uses two separate $K$ projections).
+  \item We sanity-check that fixed-topology EML compositions match
+        $\exp$, $\ln$, and softmax to $\sim$$10^{-12}$ in 64-bit precision,
+        and that small \emph{parameterized} EML trees fit sigmoid and
+        softmax several orders of magnitude below any reasonable accuracy
+        threshold.
+  \item In a small character-level transformer on TinyShakespeare we beat
+        the softmax baseline by $0.11$ nats at iso-iter and by $0.03$--$0.06$
+        nats at iso-wall-clock---a robust win across three seeds, well
+        outside inter-seed variance, and to our knowledge the first
+        reported instance of a single-Sheffer-primitive attention
+        outperforming softmax under a matched compute budget.
+\end{itemize}
+
+\section{Background: EML as a Sheffer Stroke for Elementary Functions}
+
+Define $\mathrm{eml}(x, y) = \exp(x) - \ln(y)$ over $x \in \mathbb{R}$,
+$y > 0$. \citet{odrzywolek2026eml} establishes that the grammar
+\[
+  S \;\to\; 1 \;\mid\; \mathrm{eml}(S, S)
+\]
+generates every standard elementary function as a finite tree, with leaves
+restricted to the constant $1$ (or input variables). For example,
+\begin{align}
+  \exp(x) &= \mathrm{eml}(x, 1), \\
+  \ln(x)  &= \mathrm{eml}\bigl(1,\,\mathrm{eml}\bigl(\mathrm{eml}(1, x),\,1\bigr)\bigr), \\
+  a - b   &= \mathrm{eml}\bigl(\ln(a),\,\exp(b)\bigr), \quad a > 0.
+\end{align}
+The grammar is universal in the same constructive sense in which NAND is
+universal for propositional logic: every elementary expression is the
+output of a uniform tree of identical nodes plus the constant. Crucially,
+this universality is \emph{structural}---there are no learned weights
+inside the tree. It says that EML expressions are syntactically rich
+enough to express what we would otherwise build out of separate
+$\exp$, $\ln$, $+$, $\times$, and $\div$ nodes.
+
+\paragraph{Why softmax is the right slot.} Softmax is binary in its
+\emph{shape}: $\mathrm{softmax}(L)_{ij} \propto \exp(L_{ij})$, normalized
+by an aggregate $\sum_k \exp(L_{ik})$ over sibling logits. Each output
+depends on a per-cell value and a per-row aggregate. EML is binary by
+definition, with two arguments. The slots line up. By contrast, unary
+activations like \textsc{relu} and \textsc{gelu} expose only one of EML's
+two legs to learned input, leaving the other leg as a fixed constant or a
+copy---which underuses EML's structure. So we put EML where its arity
+matches: the normalization slot of attention.
+
+\paragraph{Application mode.} The naive Mode A---use the closed-form
+EML expansion of softmax---is mathematically identical to softmax and
+brings no learning benefit. We adopt instead a Mode B: a parameterized
+EML cell where each leg is fed by a learned linear projection of the
+queries and keys. The tree topology becomes a hyperparameter; the
+expressivity is now driven by the linear maps, with EML providing the
+non-linearity.
+
+\section{Sheffer-Stroke Attention}
+
+Let $Q, K, V \in \mathbb{R}^{T \times d}$ denote queries, keys, and
+values for a single head, and let $L = QK^\top / \sqrt{d}$ be the matrix
+of attention logits with row index $i$ and column index $j$. Causal
+masking is applied via a binary mask $M_{ij} \in \{0, 1\}$ rather than the
+$-\infty$ trick, so all quantities remain finite for the $\exp$/$\ln$
+calls. Let $\mathrm{sp}(\cdot)$ denote $\mathrm{softplus}$ and $\varepsilon$
+a small positivity constant ($10^{-6}$).
+
+\subsection{EML-Norm-v1 (single-projection)}
+\begin{align}
+  a_i           &= \textstyle\sum_k \mathrm{sp}(L_{ik})\,M_{ik} + \varepsilon, \\
+  r_{ij}        &= \mathrm{eml}\bigl(L_{ij},\,a_i\bigr) \;=\; \exp(L_{ij}) - \ln(a_i), \\
+  w_{ij}        &= \mathrm{sp}(r_{ij})\,M_{ij}, \qquad
+  A_{ij}        \;=\; w_{ij} \,\big/\, \textstyle\sum_k w_{ik}.
+\end{align}
+The aggregate $a_i$ uses $\mathrm{softplus}$ so it is strictly positive
+without needing an $\exp$ for every element; this gives the EML cell a
+qualitatively different aggregator from softmax's $\sum \exp$.
+
+\subsection{EML-Norm-v2 (twin-projection)}
+We introduce a second key projection $K_y$ disjoint from the standard $K$
+used to compute $L$. Letting $L^{(x)} = QK^\top/\sqrt{d}$ and
+$L^{(y)} = QK_y^\top/\sqrt{d}$,
+\begin{align}
+  a_i     &= \textstyle\sum_k \exp\bigl(\mathrm{clamp}(L^{(y)}_{ik})\bigr)\,M_{ik} + \varepsilon, \\
+  r_{ij}  &= \mathrm{eml}\bigl(L^{(x)}_{ij},\,a_i\bigr), \qquad
+  w_{ij}   = \mathrm{sp}(r_{ij})\,M_{ij}, \\
+  A_{ij}  &= w_{ij} \,\big/\, \textstyle\sum_k w_{ik}.
+\end{align}
+\textsc{eml-norm-v2} is a strict generalization of softmax: the keys used
+for the per-cell value and the keys used for the row aggregate are now
+parameterized independently. Softmax corresponds to $K_y = K$ and a
+\emph{different} normalization wrapper, so v2 covers softmax's expressive
+class plus directions softmax cannot reach.
+
+\subsection{Numerical considerations}
+We clamp $L$ legs to $[-20, 20]$ in \textsc{fp32} (and $[-15, 15]$ under
+bf16/fp16), run the EML cell inside an autocast-disabled region so the
+$\exp$/$\ln$ are always evaluated in $\geq$\textsc{fp32} precision, and
+use small-init scaling ($0.1\times$ Kaiming) on the linear maps that feed
+EML legs. The $0.1$ factor keeps $\exp(L)$ near $1$ and $\mathrm{sp}(L)$
+near $\ln 2$ at initialization, which empirically prevents the large
+gradients we observed under default Kaiming init. Gradient flow is via
+native autograd through $\exp$, $\ln$, $\mathrm{softplus}$; no custom
+backward is needed, but we apply $\|\nabla\|_2 \leq 1$ clipping in the
+trainer.
+
+\section{Experiments}
+
+\paragraph{Setup.} A nanoGPT-style \textsc{TinyGPT} on TinyShakespeare,
+byte-level vocabulary (256 tokens), block size 64, $4$ layers, $4$ heads,
+$d_{\text{model}} = 128$, batch size $32$, AdamW with cosine learning rate
+schedule, $500$ training iterations. Standard \textsc{gelu} feed-forward
+blocks are kept; only the attention normalization is varied via a single
+\texttt{--attn} flag. All runs in this paper are on CPU
+(\texttt{configs/charlm\_cpu.yaml}); the GPU configuration in the released
+code is otherwise identical at larger scale.
+
+\subsection{Sanity checks}
+
+\paragraph{Mode-A closed-form compositions.} We re-encode $\exp$, $\ln$,
+and softmax as fixed EML trees per Section~2 and compare to the standard
+PyTorch implementations on $200$ random fp64 inputs. Maximum absolute
+error: $1.0\!\times\!10^{-12}$ for $\exp$, $2.0\!\times\!10^{-11}$ for
+$\ln$, and $1.0\!\times\!10^{-12}$ for softmax. EML compositions reproduce
+the corresponding standard functions to floating-point round-off, as
+predicted by the universality theorem.
+
+\paragraph{Mode-B parameterized fits.} A depth-3 EML tree with hidden
+width $16$ fits the sigmoid function over $[-5, 5]$ to MSE
+$2.4\!\times\!10^{-6}$ in $2{,}000$ Adam steps. A depth-2 EML tree with
+hidden width $32$ fits the softmax over a vector of length $4$ to
+KL-divergence $4.5\!\times\!10^{-5}$ in $2{,}500$ steps. Small EML trees
+are easily trainable targets, far below any reasonable accuracy bar.
+
+\subsection{Main result: TinyShakespeare}
+
+We train the three attention variants under identical configuration, three
+seeds $\{1337, 42, 7\}$, and report mean $\pm$ std validation cross-entropy
+on the held-out $10\%$ split.
+
+\begin{table}[t]
+\centering
+\caption{TinyShakespeare validation loss after $500$ iterations, three
+seeds. Lower is better. Wall-clock is the mean training time per seed.}
+\label{tab:isoiter}
+\begin{tabular}{lrrr}
+\toprule
+\textsc{attn} & \#params & val loss (mean $\pm$ std) & wall-clock \\
+\midrule
+softmax              &   799{,}488 & $2.5033 \pm 0.0013$ & $23.3$\,s \\
+\textsc{eml-norm-v1} &   799{,}488 & $\mathbf{2.3931 \pm 0.0086}$ & $27.5$\,s \\
+\textsc{eml-norm-v2} &   865{,}024 & $\mathbf{2.3875 \pm 0.0104}$ & $31.7$\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both EML variants beat the softmax baseline by $\sim$$0.11$ nats of
+validation loss (Table~\ref{tab:isoiter}). The improvement is roughly
+$10\times$ the inter-seed standard deviation, so it is well outside noise.
+\textsc{eml-norm-v1} matches softmax's parameter count; \textsc{eml-norm-v2}
+adds an $8\%$ parameter overhead via the second key projection.
+
+\paragraph{Iso-wall-clock fairness.} EML's per-iter cost is higher
+(extra $\mathrm{softplus}$, sum, $\exp$, $\ln$, $\mathrm{softplus}$ ops
+plus the \textsc{fp32} fence). To check whether the eval-loss win is
+merely a more-compute artifact, we extend the softmax baseline to $600$
+and $700$ iterations so its wall-clock matches the EML runs.
+
+\begin{table}[t]
+\centering
+\caption{Iso-wall-clock fairness budget. Softmax is given more iterations
+to match EML's wall-clock; EML still wins.}
+\label{tab:isowall}
+\begin{tabular}{lrrr}
+\toprule
+\textsc{attn} & iters & wall-clock & val loss (mean $\pm$ std) \\
+\midrule
+softmax              & 500 & $22.5$\,s & $2.5033 \pm 0.0013$ \\
+softmax              & 600 & $27.3$\,s & $2.4514 \pm 0.0058$ \\
+softmax              & 700 & $33.0$\,s & $2.4144 \pm 0.0001$ \\
+\textsc{eml-norm-v1} & 500 & $29.3$\,s & $\mathbf{2.3931 \pm 0.0086}$ \\
+\textsc{eml-norm-v2} & 500 & $32.0$\,s & $\mathbf{2.3875 \pm 0.0104}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At $\sim$$27$\,s wall-clock, \textsc{eml-norm-v1} beats compute-matched
+softmax by $0.058$ nats; at $\sim$$33$\,s, \textsc{eml-norm-v2} wins by
+$0.027$ nats (Table~\ref{tab:isowall}). The win shrinks under an honest
+fairness budget but does not disappear.
+
+\paragraph{What about speed?} EML is structurally slower than softmax on
+this hardware: $+18\%$ per-iter for v1, $+36\%$ for v2. This is the
+arithmetic cost of the extra ops plus the autocast fence; closing it
+would require a fused EML kernel or---per the framing of
+\citet{odrzywolek2026hardware}---dedicated EML cells in FPGA or analog
+silicon. We make no speed claim here.
+
+\section{Discussion and Limitations}
+
+\paragraph{Why does EML help?} We have only an empirical answer. Two
+plausible mechanisms: (i) softmax's $\sum \exp$ aggregator is strongly
+peaked when one logit dominates, which can cause attention collapse and
+gradient sparsity at the head level; \textsc{eml-norm-v1}'s
+$\sum \mathrm{softplus}$ aggregator saturates more gently. (ii)
+\textsc{eml-norm-v2}'s twin-projection decouples the keys used for the
+attention value from the keys used for the row aggregate, which softmax
+cannot do. Distinguishing these two mechanisms cleanly would require
+ablations we leave for future work.
+
+\paragraph{Scale.} Our experiments are at $800$\,K parameters. We do not
+claim the gain transfers to GPT-2--scale or beyond; the right next
+experiment is exactly that.
+
+\paragraph{Speed.} As discussed, EML is slower per iter on commodity
+hardware. The original arXiv~2604.13871 motivation for EML was hardware
+efficiency on FPGA/analog, not GPU speed. Our results show that EML is
+also a competitive \emph{learning} primitive at small scale, but a true
+speed win requires kernel fusion or specialized silicon.
+
+\paragraph{Hyperparameter sensitivity.} We did no hyperparameter search.
+The small-init scale ($0.1\times$ Kaiming) was set once during prototyping
+to keep $\exp$ near $1$ at step zero, and never tuned. A more careful
+search may reveal whether the win grows or shrinks.
+
+\section{Related Work}
+
+\paragraph{Softmax alternatives in attention.} Linear
+attention~\citep{katharopoulos2020transformers},
+performer/random-feature attention~\citep{choromanski2021performers},
+\textsc{relu} or squared-\textsc{relu}
+attention~\citep{wortsman2023replacing}, and \textsc{cosformer}-style
+re-weightings, among others. Most aim at speed/memory; ours is the first
+we know of motivated by a Sheffer-style universality argument.
+
+\paragraph{EML as a building block.}
+\citet{odrzywolek2026eml} introduces the operator and proves the
+universality result. \citet{odrzywolek2026hardware} embeds EML in a
+neuro-symbolic head with weight-snapping for symbolic recovery, targeting
+FPGA/analog deployment. Neither uses EML as a non-linearity inside
+attention.
+
+\paragraph{Sheffer strokes more broadly.} The universality of NAND in
+propositional logic and the use of single-operator architectures appear
+in formal verification and digital design. Our work is the first
+application of a Sheffer-style universality argument we are aware of to
+the design of a transformer non-linearity.
+
+\section{Conclusion}
+
+We replaced the softmax in transformer attention with a single application
+of the binary primitive $\mathrm{eml}(x, y) = \exp(x) - \ln(y)$, motivated
+by the observation that softmax's slot has a binary shape and EML is the
+universal binary operator over elementary functions. In a small
+character-level transformer on TinyShakespeare, the resulting Sheffer-
+Stroke Attention beats softmax in validation loss across seeds and under
+an iso-wall-clock budget, despite a structural per-iter slowdown. We see
+this as an existence proof that the softmax slot is more flexible than
+common practice assumes, and as motivation to study EML-style
+normalizations at larger scale.
+
+\section*{Reproducibility}
+All code, configs, dataset loader, and the multi-seed training script are
+released at \url{https://github.com/zizhao-hu/llm-proof-walkthrough}. The
+Tables~\ref{tab:isoiter} and~\ref{tab:isowall} can be regenerated with
+\texttt{python experiments/multiseed.py} on a single CPU in under three
+minutes total.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

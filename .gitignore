@@ -10,3 +10,11 @@ build/
 # training artifacts
 runs/
 *.pt
+# latex build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.synctex.gz
