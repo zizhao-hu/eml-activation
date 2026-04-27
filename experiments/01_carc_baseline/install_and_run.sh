@@ -15,6 +15,9 @@ module load gcc/13.3.0 cuda/12.6.3
 export CUDA_HOME=$CUDA_ROOT
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export HF_HOME=/scratch1/$USER/.cache/huggingface
+# avoid home-quota issues: keep uv cache on scratch
+export UV_CACHE_DIR=/scratch1/$USER/.cache/uv
+mkdir -p "$UV_CACHE_DIR" "$HF_HOME"
 
 VENV=/scratch1/zizhaoh/envs/eml-activation
 
