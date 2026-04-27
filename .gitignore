@@ -14,4 +14,6 @@ data/
 # run outputs (kept locally; large files)
 runs/*/ckpt.pt
 runs/*_stdout.log
+runs_carc/*/ckpt.pt
+runs_carc/*_stdout.log
 

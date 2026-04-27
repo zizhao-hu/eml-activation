@@ -81,6 +81,51 @@ EML-GLU is a worse activation than SwiGLU on both axes (quality and speed) at th
 
 A more interesting follow-up would be EML inside a physics-informed regression task at the scale the paper actually evaluates, where symbolic snapping and FPGA targeting come into play.
 
+## Findings (CARC GPU run, 11M params, 5k steps, A6000)
+
+Same architecture as the local run but scaled up: `d_model=384, n_layer=6, n_head=6, ctx=256, batch=64`. ~11M params.
+
+### Loss
+
+![loss curves CARC](runs_carc/figs/loss_curves.png)
+
+| FFN     | min val loss | step@min | final val loss | final train loss |
+|---------|-------------:|---------:|---------------:|-----------------:|
+| ReLU    | 1.5359       | 750      | 4.3727         | 0.0948           |
+| GELU    | **1.5294**   | 750      | 4.2622         | 0.0877           |
+| SwiGLU  | 1.5738       | 750      | 4.4747         | 0.0944           |
+| EML-GLU | 1.5874       | 3000     | **1.6937**     | 1.1057           |
+
+Two stories the same numbers tell:
+
+1. **At the early-stopping minimum**, GELU wins by 0.06 nats (1.53 vs 1.59). EML-GLU is competitive but slightly worse — same picture as the local 820k-param run.
+2. **Without early stopping**, ReLU/GELU/SwiGLU all overfit catastrophically — train loss collapses to ~0.09 while val loss climbs to 4.3+. EML-GLU never overfits: train plateaus at 1.10, val stays at 1.6–1.7 from step 1000 onward. Final-vs-final, EML-GLU beats the baselines by **2.5×** on val loss.
+
+The clamping (`x.clamp(±10)` before `exp`, `softplus(y)+ε` before `ln`) acts as strong implicit regularization. The paper warns these clamps "disrupt exact gradient flow" (Sec 6.2) — and at this regime, that disruption is the feature, not the bug. EML-GLU literally cannot drive train loss to zero, which protects val loss when the model has too much capacity for the data.
+
+### Speed (A6000, 4 layers / d_model=128)
+
+![bench CARC](runs_carc/figs/bench.png)
+
+| FFN     | T=128 fwd+bwd | T=256 | T=512 | T=1024 | tok/s @ T=512 |
+|---------|--------------:|------:|------:|-------:|--------------:|
+| ReLU    | 4.04 ms       | 4.59  | 9.03  | 21.81  | 907,428       |
+| GELU    | 4.04 ms       | 4.57  | 9.04  | 21.83  | 906,649       |
+| SwiGLU  | 4.66 ms       | 5.15  | 10.12 | 23.72  | 809,867       |
+| EML-GLU | 5.20 ms       | 5.72  | 11.18 | 25.82  | 732,474       |
+
+EML-GLU is **9–11% slower than SwiGLU** on GPU (vs ~14% on CPU). Gap narrows on GPU because the per-element exp/ln amortizes nicely against the larger matmul costs. Still consistent with the paper's prediction that EML can't accelerate inference on commodity hardware.
+
+### Caveats
+
+1. **Char-shakespeare at 11M params is overcapacity.** The "EML-GLU prevents overfitting" story is real but happens because the baselines are so over-parameterized for this dataset. At a properly-sized model + dataset, the implicit regularization may or may not help.
+2. **No regularization tuned for the baselines.** SwiGLU/GELU could probably match EML-GLU's final loss with dropout or weight decay sweeps. We didn't tune.
+3. **Min val gap is small.** The headline-worthy story is the overfitting curve, not the absolute min — ±0.06 nats is within run-to-run noise without seed sweeps.
+
+### Local CPU run (smaller-scale sanity check)
+
+For completeness, the original 820k-param / 2k-step / shakespeare_char CPU run sits in `runs/`. At that smaller scale none of the variants overfit, and EML-GLU was simply 0.15 nats worse than SwiGLU. The overfitting story emerges only at the larger scale.
+
 ## Plan
 
 See [PLAN.md](./PLAN.md) for the full design + risk register.

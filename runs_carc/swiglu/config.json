@@ -1,0 +1,21 @@
+{
+  "ffn": "swiglu",
+  "steps": 5000,
+  "batch_size": 64,
+  "block_size": 256,
+  "n_layer": 6,
+  "n_head": 6,
+  "d_model": 384,
+  "d_ff_mult": 4,
+  "max_lr": 0.003,
+  "min_lr": 0.0003,
+  "warmup": 100,
+  "weight_decay": 0.1,
+  "eval_interval": 250,
+  "eval_iters": 50,
+  "out": "runs_carc/swiglu",
+  "seed": 42,
+  "device": null,
+  "vocab_size": 65,
+  "n_params": 10773888
+}
