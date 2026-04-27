@@ -60,6 +60,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--save_ckpt", action="store_true", default=False)
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -118,8 +119,11 @@ def main():
                 writer.writerow([step, lr, losses["train"], losses["val"], step_ms])
                 f.flush()
 
-    torch.save({"model": model.state_dict(), "cfg": vars(cfg)}, out / "ckpt.pt")
-    print(f"saved checkpoint to {out / 'ckpt.pt'}")
+    if args.save_ckpt:
+        torch.save({"model": model.state_dict(), "cfg": vars(cfg)}, out / "ckpt.pt")
+        print(f"saved checkpoint to {out / 'ckpt.pt'}")
+    else:
+        print("done (ckpt not saved; pass --save_ckpt to keep)")
 
 
 if __name__ == "__main__":
